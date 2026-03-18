@@ -186,21 +186,21 @@ Module_B/
 1. Install Module B dependencies:
 
 ```bash
-csmdb_venv\Scripts\python.exe -m pip install -r Module_B/requirements.txt
+pip install -r Module_B/requirements.txt
 ```
 
-2. Create schema and load sample data in local MySQL:
+2. Run the schema and load sample data in local MySQL:
 
 ```sql
-SOURCE Module_B/sql/schema.sql;
-SOURCE Module_B/sql/sample_data.sql;
+Module_B/sql/schema.sql;
+Module_B/sql/sample_data.sql;
 ```
 
 3. Run API server:
 
 ```bash
 cd Module_B/app
-csmdb_venv\Scripts\python.exe -m uvicorn main:app --reload --port 8001
+uvicorn main:app --reload --port 8001
 ```
 
 4. Open UI:
