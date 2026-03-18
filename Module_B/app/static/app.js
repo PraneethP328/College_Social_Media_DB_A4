@@ -65,6 +65,15 @@ function redirectTo(url) {
   window.location.href = url;
 }
 
+async function parseApiResponse(res) {
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return await res.json();
+  }
+  const text = await res.text();
+  return { detail: text || "Unexpected server response" };
+}
+
 function setupHamburgerAndLogout() {
   const toggle = document.getElementById("menu-toggle");
   const menu = document.getElementById("mobile-nav");
@@ -207,27 +216,34 @@ function initLoginPage() {
     const username = document.getElementById("email").value;
     const password = document.getElementById("password").value;
 
-    const res = await fetch("/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
-    const payload = await res.json();
+    setStatus("auth-status", "Signing in...");
 
-    if (!res.ok) {
-      setStatus("auth-status", payload.detail || "Login failed", true);
-      return;
+    try {
+      const res = await fetch("/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const payload = await parseApiResponse(res);
+
+      if (!res.ok) {
+        setStatus("auth-status", payload.detail || "Login failed", true);
+        return;
+      }
+
+      sessionToken = payload.session_token;
+      const user = await verifySession();
+      if (!user) {
+        setStatus("auth-status", "Session validation failed", true);
+        return;
+      }
+
+      persistSession(payload.session_token, user);
+      redirectTo("/static/portfolio.html");
+    } catch (err) {
+      setStatus("auth-status", "Unable to reach server. Check API and database connection.", true);
+      console.error("Login error:", err);
     }
-
-    sessionToken = payload.session_token;
-    const user = await verifySession();
-    if (!user) {
-      setStatus("auth-status", "Session validation failed", true);
-      return;
-    }
-
-    persistSession(payload.session_token, user);
-    redirectTo("/static/portfolio.html");
   });
 }
 
