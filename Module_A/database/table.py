@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from .bplustree import BPlusTree
 
@@ -76,6 +76,90 @@ class Table:
         rows = self._index.get_all()
         return [(k, deepcopy(v)) for k, v in rows]
 
+    def select(
+        self,
+        predicate: Optional[Callable[[Dict[str, Any]], bool]] = None,
+        columns: Optional[Iterable[str]] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return rows matching predicate, with optional projection and limit."""
+        if predicate is not None and not callable(predicate):
+            raise TypeError("predicate must be callable or None")
+        if limit is not None and (not isinstance(limit, int) or limit < 0):
+            raise ValueError("limit must be a non-negative integer or None")
+
+        selected_columns: Optional[List[str]] = None
+        if columns is not None:
+            selected_columns = list(columns)
+            if self.schema is not None:
+                unknown = set(selected_columns) - self.schema
+                if unknown:
+                    raise ValueError(f"Unknown columns for table '{self.name}': {sorted(unknown)}")
+
+        results: List[Dict[str, Any]] = []
+        for _, row in self._index.get_all():
+            if predicate is not None and not predicate(row):
+                continue
+
+            if selected_columns is None:
+                out = deepcopy(row)
+            else:
+                out = {col: deepcopy(row.get(col)) for col in selected_columns}
+
+            results.append(out)
+            if limit is not None and len(results) >= limit:
+                break
+
+        return results
+
+    def aggregate(
+        self,
+        operation: str,
+        column: Optional[str] = None,
+        predicate: Optional[Callable[[Dict[str, Any]], bool]] = None,
+    ) -> Any:
+        """Compute simple aggregations: count, sum, min, max, avg."""
+        if predicate is not None and not callable(predicate):
+            raise TypeError("predicate must be callable or None")
+        if not isinstance(operation, str) or not operation.strip():
+            raise ValueError("operation must be a non-empty string")
+
+        op = operation.strip().lower()
+        supported = {"count", "sum", "min", "max", "avg"}
+        if op not in supported:
+            raise ValueError(f"Unsupported operation '{operation}'. Supported: {sorted(supported)}")
+
+        if op != "count" and not column:
+            raise ValueError("column is required for sum/min/max/avg")
+
+        if column is not None and self.schema is not None and column not in self.schema:
+            raise ValueError(f"Unknown column '{column}' for table '{self.name}'")
+
+        rows = self.select(predicate=predicate)
+
+        if op == "count":
+            if column is None:
+                return len(rows)
+            return sum(1 for row in rows if row.get(column) is not None)
+
+        values = [row.get(column) for row in rows if row.get(column) is not None]
+
+        if op in {"sum", "avg"}:
+            non_numeric = [v for v in values if not isinstance(v, (int, float)) or isinstance(v, bool)]
+            if non_numeric:
+                raise TypeError(f"Column '{column}' contains non-numeric values, cannot compute {op}")
+
+        if op == "sum":
+            return sum(values)
+        if op == "min":
+            return min(values) if values else None
+        if op == "max":
+            return max(values) if values else None
+        if op == "avg":
+            return (sum(values) / len(values)) if values else None
+
+        return None
+
     def count(self) -> int:
         return len(self._index.get_all())
 
@@ -91,7 +175,7 @@ class Table:
         return self._validate_key_type(row[self.primary_key])
 
     def _validate_key_type(self, key: Any) -> int:
-        if not isinstance(key, int):
+        if not isinstance(key, int) or isinstance(key, bool):
             raise TypeError("Primary key must be an integer for B+ Tree indexing")
         return key
 

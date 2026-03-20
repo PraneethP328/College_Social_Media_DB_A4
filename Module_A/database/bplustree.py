@@ -354,7 +354,7 @@ class BPlusTree:
         return node
 
     def _validate_key(self, key: int) -> None:
-        if not isinstance(key, int):
+        if not isinstance(key, int) or isinstance(key, bool):
             raise TypeError("BPlusTree currently supports integer keys only")
 
     def _min_keys(self, node: BPlusTreeNode) -> int:
