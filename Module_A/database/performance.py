@@ -12,7 +12,8 @@ from .bruteforce import BruteForceDB
 
 @dataclass
 class BenchmarkConfig:
-    sizes: Tuple[int, ...] = tuple(range(100, 100001, 10000))  # 100, 10100, ..., 90100
+    # Dense sampling at smaller sizes, then coarser sampling for larger sizes.
+    sizes: Tuple[int, ...] = tuple(range(100, 10100, 1000)) + tuple(range(10100, 100001, 10000))
     seed: int = 42
     bplustree_order: int = 4
     show_progress: bool = True

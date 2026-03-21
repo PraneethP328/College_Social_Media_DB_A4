@@ -19,15 +19,25 @@ from matplotlib.figure import Figure
 class PerformanceVisualizer:
     """Generate comprehensive performance comparison visualizations."""
 
-    def __init__(self, output_dir: str | Path = "visualizations") -> None:
+    def __init__(
+        self,
+        output_dir: str | Path = "visualizations",
+        jpg_output_dir: str | Path | None = None,
+        overwrite: bool = False,
+    ) -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.jpg_output_dir = self.output_dir.parent / "performance_results_jpgs"
+        # Keep ad-hoc runs isolated by default; explicit callers can still target shared artifact folders.
+        self.jpg_output_dir = Path(jpg_output_dir) if jpg_output_dir is not None else (self.output_dir / "performance_results_jpgs")
         self.jpg_output_dir.mkdir(parents=True, exist_ok=True)
+        self.overwrite = overwrite
 
     def _save_figure(self, fig: Figure, base_name: str) -> None:
         """Save each chart as JPG in the dedicated performance results folder."""
         jpg_path = self.jpg_output_dir / f"{base_name}.jpg"
+        if jpg_path.exists() and not self.overwrite:
+            print(f"[SKIP] Existing chart kept: {jpg_path}")
+            return
         fig.savefig(jpg_path, dpi=300, bbox_inches='tight')
 
     def visualize_benchmarks(self, benchmark_results: Dict[str, Any]) -> None:
@@ -201,6 +211,9 @@ class PerformanceVisualizer:
     def save_results_to_json(self, benchmark_results: Dict[str, Any], filename: str = "benchmark_results.json") -> None:
         """Save benchmark results to JSON file for later analysis."""
         filepath = self.output_dir / filename
+        if filepath.exists() and not self.overwrite:
+            print(f"[SKIP] Existing results kept: {filepath}")
+            return
         with open(filepath, 'w') as f:
             json.dump(benchmark_results, f, indent=2)
         print(f"[OK] Results saved to {filepath}")
@@ -233,13 +246,16 @@ def run_full_performance_analysis(
     output_dir: str | Path = "visualizations",
     sizes: tuple | None = None,
     bplustree_order: int = 4,
+    jpg_output_dir: str | Path | None = None,
+    overwrite: bool = False,
+    save_json: bool = True,
 ) -> Dict[str, Any]:
     """
     Run complete performance analysis with visualization.
 
     Args:
         output_dir: Directory to save visualization files
-        sizes: Tuple of dataset sizes to test (default: range 100-10000 by 1000)
+        sizes: Tuple of dataset sizes to test (default: BenchmarkConfig mixed-size strategy)
         bplustree_order: B+ tree order parameter
 
     Returns:
@@ -249,7 +265,7 @@ def run_full_performance_analysis(
 
     # Use custom sizes if provided
     if sizes is None:
-        sizes = tuple(range(100, 10001, 1000))
+        sizes = BenchmarkConfig().sizes
 
     config = BenchmarkConfig(sizes=sizes, bplustree_order=bplustree_order)
     analyzer = PerformanceAnalyzer(config)
@@ -262,14 +278,19 @@ def run_full_performance_analysis(
     results = analyzer.run_all_benchmarks()
 
     # Print summary
-    visualizer = PerformanceVisualizer(output_dir)
+    visualizer = PerformanceVisualizer(
+        output_dir=output_dir,
+        jpg_output_dir=jpg_output_dir,
+        overwrite=overwrite,
+    )
     visualizer.print_summary_table(results)
 
     # Generate visualizations
     visualizer.visualize_benchmarks(results)
 
     # Save results
-    visualizer.save_results_to_json(results)
+    if save_json:
+        visualizer.save_results_to_json(results)
 
     return results
 

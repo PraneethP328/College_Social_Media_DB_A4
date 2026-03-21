@@ -27,6 +27,7 @@ def main() -> None:
 
     # Use absolute path based on script location
     output_dir = Path(__file__).resolve().parent / "visualizations"
+    jpg_output_dir = Path(__file__).resolve().parent / "performance_results_jpgs"
 
     print("Configuration:")
     print(f"  - Test Sizes: {test_sizes}")
@@ -38,6 +39,9 @@ def main() -> None:
         output_dir=str(output_dir),
         sizes=test_sizes,
         bplustree_order=4,
+        jpg_output_dir=str(jpg_output_dir),
+        overwrite=True,
+        save_json=True,
     )
 
 
