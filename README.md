@@ -217,6 +217,22 @@ cd Module_B/app
 uvicorn main:app --reload --port 8001
 ```
 
+If you are on Windows PowerShell, set the DB password environment variable before starting the API:
+
+```powershell
+$env:DB_PASSWORD="<your-mysql-password>"
+
+cd Module_B/app
+uvicorn main:app --reload --port 8001
+```
+
+Optional (persist across new PowerShell sessions):
+
+```powershell
+setx DB_PASSWORD "<your-mysql-password>"
+```
+**DON'T TRY TO SET THE PASSWORD IN database.py**
+
 4. Open UI:
 
 - http://127.0.0.1:8001/
