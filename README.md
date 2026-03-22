@@ -64,10 +64,6 @@ python run_performance_tests.py
 
 This runs performance testing for different random key set sizes and generates:
 
-- Sampling strategy used in `run_performance_tests.py`:
-  - dense at smaller sizes: `range(100, 10100, 1000)`
-  - coarser at larger sizes: `range(10100, 100001, 10000)`
-
 - Performance charts in `Module_A/database/performance_results_jpgs/`
 - Benchmark JSON in `Module_A/database/visualizations/benchmark_results.json`
 
