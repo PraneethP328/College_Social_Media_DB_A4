@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from .bplustree import BPlusTree
@@ -166,6 +168,65 @@ class Table:
     def truncate(self) -> None:
         # Reinitialize the index to clear all rows.
         self._index = BPlusTree(order=self._index.order)
+
+    def execute_atomic(self, operation: Callable[[], Any]) -> Any:
+        """
+        Execute an operation atomically using snapshot rollback.
+
+        If `operation` raises an exception, table state is restored to the
+        pre-operation snapshot and the original exception is re-raised.
+        """
+        if not callable(operation):
+            raise TypeError("operation must be callable")
+
+        snapshot = self._snapshot_state()
+        try:
+            return operation()
+        except Exception:
+            self._restore_state(snapshot)
+            raise
+
+    def save_snapshot(self, file_path: str | Path) -> Path:
+        """Persist table metadata and rows to a JSON snapshot file."""
+        path = Path(file_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "name": self.name,
+            "primary_key": self.primary_key,
+            "schema": sorted(self.schema) if self.schema is not None else None,
+            "bplustree_order": self._index.order,
+            "rows": [row for _, row in self.all_rows()],
+        }
+
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return path
+
+    @classmethod
+    def load_snapshot(cls, file_path: str | Path) -> "Table":
+        """Recreate a table from a JSON snapshot produced by `save_snapshot`."""
+        path = Path(file_path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+
+        table = cls(
+            name=payload["name"],
+            primary_key=payload.get("primary_key", "id"),
+            schema=payload.get("schema"),
+            bplustree_order=payload.get("bplustree_order", 4),
+        )
+
+        for row in payload.get("rows", []):
+            table.upsert(row)
+
+        return table
+
+    def _snapshot_state(self) -> List[Dict[str, Any]]:
+        return [row for _, row in self.all_rows()]
+
+    def _restore_state(self, snapshot_rows: List[Dict[str, Any]]) -> None:
+        self.truncate()
+        for row in snapshot_rows:
+            self.upsert(row)
 
     def _extract_and_validate_key(self, row: Dict[str, Any]) -> int:
         if not isinstance(row, dict):
