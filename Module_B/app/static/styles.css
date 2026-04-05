@@ -314,9 +314,9 @@ button:hover {
 }
 
 .post-item button.like-toggle-icon.liked {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fff5f5;
+  color: #b91c1c !important;
+  border-color: #fecaca !important;
+  background: #fff5f5 !important;
 }
 
 .like-icon {
