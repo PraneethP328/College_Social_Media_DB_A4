@@ -30,27 +30,26 @@ College_Social_Media_DB_A3/
 `-- Module_B/
     |-- requirements.txt
     |-- report.ipynb
-    |-- report.tex
     |-- modB_dash.png
     |-- locust_dash.png
+    |-- .gitignore
     |-- app/
     |   |-- main.py
     |   |-- database.py
     |   |-- test_db.py
     |   `-- static/
-    |       |-- login.html
-    |       |-- portfolio.html
-    |       |-- create-post.html
-    |       |-- posts.html
-    |       |-- app.js
-    |       `-- styles.css
     |-- sql/
     |   |-- schema.sql
-    |   `-- sample_data.sql
-    `-- performance/
-        |-- run_module_b_concurrency_stress.py
-        |-- run_module_b_locust_profiles.py
-        `-- locustfile_module_b.py
+    |   |-- sample_data.sql
+    |   `-- sample_passwords.txt
+    |-- performance/
+    |   |-- run_module_b_concurrency_stress.py
+    |   |-- run_module_b_locust_profiles.py
+    |   |-- locustfile_module_b.py
+    |   |-- module_b_concurrency_report.json
+    |   `-- index_benchmark_results.json
+    `-- logs/
+        `-- audit.log
 ```
 
 ## Setup
@@ -179,34 +178,6 @@ All 4 tests operate on **3 relations simultaneously**:
 ## Module B (Assignment 3): Concurrency, Failure Simulation, and Stress Testing
 
 This module contains the FastAPI + MySQL application and Assignment 3 validation workflow for concurrency, race handling, failure simulation, and stress testing.
-
-### What Is In Module B
-
-```text
-Module_B/
-|-- requirements.txt
-|-- report.ipynb
-|-- modB_dash.png
-|-- locust_dash.png
-|-- .gitignore
-|-- app/
-|   |-- main.py
-|   |-- database.py
-|   |-- test_db.py
-|   `-- static/
-|-- sql/
-|   |-- schema.sql
-|   |-- sample_data.sql
-|   `-- sample_passwords.txt
-|-- performance/
-|   |-- run_module_b_concurrency_stress.py
-|   |-- run_module_b_locust_profiles.py
-|   |-- locustfile_module_b.py
-    |-- module_b_concurrency_report.json
-|   `-- index_benchmark_results.json
-`-- logs/
-    `-- audit.log
-```
 
 Generated run artifacts (CSV and JSON reports) are intentionally cleaned before commit.
 
