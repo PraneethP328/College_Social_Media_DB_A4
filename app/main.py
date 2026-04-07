@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 from database import DatabaseQueryError, execute_query, execute_transaction
+from shard_router import ALL_SHARDS, all_shard_tables, get_shard_id, get_shard_table
 
 app = FastAPI()
 
@@ -1462,3 +1463,261 @@ def get_db_change_log(
         "unauthorized_only": unauthorized_only,
         "data": rows,
     }
+
+
+# ============================================================================
+# Sub-Task 3: Shard-Aware API Endpoints (Assignment 4)
+# All routes under /shards/* route queries to the correct shard table based
+# on the MemberID shard key using hash-based routing: shard_id = MemberID % 3
+# ============================================================================
+
+
+@app.get("/shards/info")
+def shard_info(current_user: dict = Depends(verify_session_token)):
+    """
+    Returns the shard distribution summary: how many Members, Posts, and Comments
+    live in each shard.  Useful for verifying that sharding is working correctly.
+    """
+    info = {"num_shards": len(ALL_SHARDS), "shards": []}
+    for shard_id in ALL_SHARDS:
+        member_table  = f"shard_{shard_id}_member"
+        post_table    = f"shard_{shard_id}_post"
+        comment_table = f"shard_{shard_id}_comment"
+        member_count  = execute_query(f"SELECT COUNT(*) AS c FROM {member_table}",  fetchone=True)["c"]
+        post_count    = execute_query(f"SELECT COUNT(*) AS c FROM {post_table}",    fetchone=True)["c"]
+        comment_count = execute_query(f"SELECT COUNT(*) AS c FROM {comment_table}", fetchone=True)["c"]
+        info["shards"].append({
+            "shard_id":      shard_id,
+            "member_table":  member_table,
+            "post_table":    post_table,
+            "comment_table": comment_table,
+            "member_count":  member_count,
+            "post_count":    post_count,
+            "comment_count": comment_count,
+        })
+    return {"message": "Shard distribution info", "data": info}
+
+
+@app.get("/shards/members/{member_id}")
+def shard_get_member(member_id: int, current_user: dict = Depends(verify_session_token)):
+    """
+    Single-key lookup: route GET /shards/members/{member_id} to the shard
+    that owns this MemberID.  Demonstrates correct lookup routing.
+    """
+    if current_user.get("member_id") is None:
+        raise HTTPException(status_code=401, detail="Invalid session payload")
+
+    shard_id    = get_shard_id(member_id)
+    shard_table = get_shard_table("member", member_id)
+
+    row = execute_query(
+        f"SELECT * FROM {shard_table} WHERE MemberID = %s",
+        (member_id,),
+        fetchone=True,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Member not found in shard")
+
+    return {
+        "message":     "Member retrieved from shard",
+        "shard_id":    shard_id,
+        "shard_table": shard_table,
+        "data":        row,
+    }
+
+
+@app.get("/shards/members/{member_id}/posts")
+def shard_get_member_posts(
+    member_id: int,
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: dict = Depends(verify_session_token),
+):
+    """
+    Single-key lookup: all posts authored by member_id are always stored in
+    that member's shard.  Route directly to the correct shard.
+    """
+    if current_user.get("member_id") is None:
+        raise HTTPException(status_code=401, detail="Invalid session payload")
+
+    shard_id    = get_shard_id(member_id)
+    shard_table = get_shard_table("post", member_id)
+
+    rows = execute_query(
+        f"""
+        SELECT PostID, MemberID, Content, MediaURL, MediaType,
+               PostDate, Visibility, LikeCount, CommentCount, IsActive, ShardID
+        FROM   {shard_table}
+        WHERE  MemberID = %s AND IsActive = TRUE
+        ORDER  BY PostDate DESC
+        LIMIT  %s OFFSET %s
+        """,
+        (member_id, limit, offset),
+        fetchall=True,
+    )
+    return {
+        "message":     "Posts retrieved from shard",
+        "shard_id":    shard_id,
+        "shard_table": shard_table,
+        "count":       len(rows),
+        "data":        rows,
+    }
+
+
+@app.get("/shards/posts")
+def shard_list_all_posts(
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: dict = Depends(verify_session_token),
+):
+    """
+    Range / global-feed query: fan-out across ALL shard Post tables,
+    merge the results, and return the most recent posts.
+    Demonstrates multi-shard range query routing.
+    """
+    if current_user.get("member_id") is None:
+        raise HTTPException(status_code=401, detail="Invalid session payload")
+
+    all_posts = []
+    shard_meta = []
+    for shard_id in ALL_SHARDS:
+        shard_table = f"shard_{shard_id}_post"
+        rows = execute_query(
+            f"""
+            SELECT PostID, MemberID, Content, MediaURL, MediaType,
+                   PostDate, Visibility, LikeCount, CommentCount, IsActive, ShardID
+            FROM   {shard_table}
+            WHERE  IsActive = TRUE
+              AND  Visibility = 'Public'
+            ORDER  BY PostDate DESC
+            LIMIT  %s
+            """,
+            (limit,),
+            fetchall=True,
+        )
+        shard_meta.append({"shard_id": shard_id, "rows_fetched_from_shard": len(rows)})
+        all_posts.extend(rows)
+
+    # Merge: sort by PostDate descending, then truncate to `limit`
+    all_posts.sort(key=lambda p: p["PostDate"], reverse=True)
+    merged = all_posts[:limit]
+
+    return {
+        "message":     "Posts retrieved via fan-out across all shards",
+        "shard_meta":  shard_meta,
+        "count":       len(merged),
+        "data":        merged,
+    }
+
+
+class ShardPostCreate(BaseModel):
+    content: str
+    media_url: str | None = None
+    media_type: Literal["Image", "Video", "Document", "None"] = "None"
+    visibility: Literal["Public", "Followers", "Private"] = "Public"
+
+
+@app.post("/shards/posts")
+def shard_create_post(
+    post_data: ShardPostCreate,
+    request: Request,
+    current_user: dict = Depends(verify_session_token),
+):
+    """
+    Insert routing: new post is written to the shard that owns the author's MemberID.
+    Also inserts into the canonical Post table for data integrity in the main app.
+    """
+    member_id = current_user.get("member_id")
+    if member_id is None:
+        raise HTTPException(status_code=401, detail="Invalid session payload")
+    if not post_data.content.strip():
+        raise HTTPException(status_code=400, detail="Content cannot be empty")
+
+    shard_id    = get_shard_id(member_id)
+    shard_table = get_shard_table("post", member_id)
+    audit_context = _db_audit_context(action="shard_post_create", current_user=current_user, request=request)
+
+    def _shard_insert_tx(cursor):
+        # 1. Write to canonical table for transactional consistency
+        cursor.execute(
+            """
+            INSERT INTO Post (MemberID, Content, MediaURL, MediaType, Visibility)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (member_id, post_data.content.strip(), post_data.media_url,
+             post_data.media_type, post_data.visibility),
+        )
+        new_post_id = int(cursor.lastrowid)
+
+        # 2. Mirror into the correct shard table
+        cursor.execute(
+            f"""
+            INSERT INTO {shard_table}
+                (PostID, MemberID, Content, MediaURL, MediaType, Visibility, ShardID)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (new_post_id, member_id, post_data.content.strip(), post_data.media_url,
+             post_data.media_type, post_data.visibility, shard_id),
+        )
+        return new_post_id
+
+    new_post_id = execute_transaction(_shard_insert_tx, audit_context=audit_context)
+
+    _audit_log(
+        action="shard_post_create",
+        actor_id=member_id,
+        actor_role=current_user.get("role"),
+        endpoint=str(request.url.path),
+        method=request.method,
+        table=f"Post,{shard_table}",
+        target_id=new_post_id,
+        outcome="success",
+        details=f"Post created and routed to {shard_table} (shard {shard_id})",
+    )
+    return {
+        "message":     "Post created and routed to correct shard",
+        "post_id":     new_post_id,
+        "shard_id":    shard_id,
+        "shard_table": shard_table,
+    }
+
+
+@app.get("/shards/members/{member_id}/comments")
+def shard_get_member_comments(
+    member_id: int,
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: dict = Depends(verify_session_token),
+):
+    """
+    Single-key lookup for comments: the author's shard holds all their comments.
+    """
+    if current_user.get("member_id") is None:
+        raise HTTPException(status_code=401, detail="Invalid session payload")
+
+    shard_id    = get_shard_id(member_id)
+    shard_table = get_shard_table("comment", member_id)
+
+    rows = execute_query(
+        f"""
+        SELECT CommentID, PostID, MemberID, Content,
+               CommentDate, LikeCount, IsActive, ShardID
+        FROM   {shard_table}
+        WHERE  MemberID = %s AND IsActive = TRUE
+        ORDER  BY CommentDate DESC
+        LIMIT  %s OFFSET %s
+        """,
+        (member_id, limit, offset),
+        fetchall=True,
+    )
+    return {
+        "message":     "Comments retrieved from shard",
+        "shard_id":    shard_id,
+        "shard_table": shard_table,
+        "count":       len(rows),
+        "data":        rows,
+    }
+
+
+# ============================================================================
+# End of Sub-Task 3 – Shard-Aware API Endpoints
+# ============================================================================
