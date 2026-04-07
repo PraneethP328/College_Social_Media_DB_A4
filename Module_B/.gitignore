@@ -1,9 +1,0 @@
-app/__pycache__/
-performance/__pycache__/
-logs/*.log
-performance/module_b_concurrency_report*.json
-performance/module_b_notebook_test_matrix_results.json
-performance/locust_*.csv
-performance/locust_*.html
-performance/module_b_locust_report*.json
-performance/module_b_locust_profiles_report.json
